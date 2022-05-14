@@ -29,7 +29,6 @@
 // Represents the number of elements in the input array
 #define N 32
 
-
 /*
  * Function that will perform reduction on sections of the input array.
  *
@@ -62,12 +61,38 @@ __global__ void reduceKernel(int sizeOfArray, int *idata, int *odata);
  */
 __host__ int sumArray(int* arr );
 
+/**
+ * Definition of the error handling functions
+ *
+ */
+#define CudaSafeCall( err ) __cudaSafeCall( err, __FILE__, __LINE__ )
+
+/**
+ * Function accepts a cuda error, file and line
+ *
+ * This will check that the err property was not a success and if so will output the error
+ * that was returned.
+ *
+ * This is intended to be used to handle errors thrown by functions such as cudaMalloc / cudaMallocManaged etc.
+ */
+inline void __cudaSafeCall(cudaError err, const char *file, const int line)
+{
+	if(cudaSuccess != err)
+	{
+		fprintf( stderr, "cudaSafeCall() failed at %s:%i : %s\n",
+				file, line, cudaGetErrorString( err ) );
+		exit( -1 );
+	}
+}
+
+
 
 /*
  * The main function that will run when the function is compiled.
  *
  */
-int main(void){
+int main(void)
+{
 
 	// Create a pointer to an array of integers and store in variable idata (input data).
 	int *idata;
@@ -76,12 +101,16 @@ int main(void){
 	//nice and simple, but it does mean that the
 	// input array is overwritten to provide the result
 
-	cudaMallocManaged(&idata, N*sizeof(int));
+	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
+	CudaSafeCall(cudaMallocManaged(&idata, N*sizeof(int)));
+
+
 	printf("Allocated memory %ld bytes to the array data.\n", N*sizeof(int) );
 
 	//Initialise the input data on the host
 	//Making it easy to test the result
-	for(int i=0; i < N; i++){
+	for(int i=0; i < N; i++)
+	{
 		idata[i] = i;
 	}
 	printf("Populated array data with values up from 0 to %d.\n", N);
@@ -97,14 +126,16 @@ int main(void){
 	printf("\n");
 
 	//Free all allocated memory
-	cudaFree(idata);
+
+	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
+	CudaSafeCall(cudaFree(idata));
 
 	// Return 0 to show that the program executed successfully.
 	return 0;
 }
 
-
-__host__ int sumArray(int* arr ) {
+__host__ int sumArray(int* arr )
+{
 
 	/*
 	 *  Create a pointer to an integer array in the variable dev_arr.
@@ -117,10 +148,15 @@ __host__ int sumArray(int* arr ) {
 	int* dev_arr;
 
 	// Allocate the dev_arr as much memory as the input arr has (as it will need to hold the same contents).
-    cudaMalloc((void**)&dev_arr, N * sizeof(int));
+
+
+	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
+	CudaSafeCall(cudaMalloc((void**)&dev_arr, N * sizeof(int)));
 
     // Copy the contents of arr into the dev_arr
-    cudaMemcpy(dev_arr, arr, N * sizeof(int), cudaMemcpyHostToDevice);
+
+	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
+	CudaSafeCall(cudaMemcpy(dev_arr, arr, N * sizeof(int), cudaMemcpyHostToDevice));
 
     // Define the variable that will hold the sum that will be returned.
 	int sum;
@@ -135,34 +171,65 @@ __host__ int sumArray(int* arr ) {
 	int* dev_out;
 
 	// Allocate memory to the dev_out array at the size of the grids.
-	cudaMalloc((void**)&dev_out, sizeof(int)* GRID_SIZE);
+
+	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
+	CudaSafeCall(cudaMalloc((void**)&dev_out, sizeof(int)* GRID_SIZE));
+
 
 	// Call the reduce kernel function to get the partial results of the sum.
 	reduceKernel<<<GRID_SIZE, BLOCK_SIZE>>>(N, dev_arr, dev_out);
+
+	// Check to see if an error was thrown during the kernel invocation
+	cudaError err = cudaGetLastError();
+	if ( cudaSuccess != err )
+	{
+		fprintf( stderr, "cudaCheckError() failed at %s:%i : %s\n", __FILE__, __LINE__, cudaGetErrorString( err ) );
+		exit( -1 );
+	}
+
 	//dev_out now holds the partial result
 
 	// Reduce the partial results into a single result stored index 0 of the dev_out array.
 	reduceKernel<<<1, BLOCK_SIZE>>>( GRID_SIZE,dev_out, dev_out);
+
+	// Check to see if an error was thrown during the kernel invocation
+	err = cudaGetLastError();
+	if ( cudaSuccess != err )
+	{
+		fprintf( stderr, "cudaCheckError() failed at %s:%i : %s\n", __FILE__, __LINE__, cudaGetErrorString( err ) );
+		exit( -1 );
+	}
+
+
 	//dev_out[0] now holds the final result
 
-	// Synchronise the device.
-	cudaDeviceSynchronize();
+	// Synchronise the device
+
+	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
+	CudaSafeCall(cudaDeviceSynchronize());
 
 	// Copy the first value of the dev_out into the sum variable. Done by copying the amount of memory that a single integer takes
 	// from the start pointer of the dev_out array into sum.
-	cudaMemcpy(&sum, dev_out, sizeof(int), cudaMemcpyDeviceToHost);
+
+	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
+	CudaSafeCall(cudaMemcpy(&sum, dev_out, sizeof(int), cudaMemcpyDeviceToHost));
 
 	// Free up the memory allocated to the dev_arr array.
-	cudaFree(dev_arr);
+
+	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
+	CudaSafeCall(cudaFree(dev_arr));
 
 	// Free up the memory allocated to the dev_out array.
-	cudaFree(dev_out);
+
+	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
+	CudaSafeCall(cudaFree(dev_out));
 
 	// Return the resultant sum to the caller (main function).
 	return sum;
 }
 
-__global__ void reduceKernel(int sizeOfArray, int *idata, int *odata){
+__global__ void reduceKernel(int sizeOfArray, int *idata, int *odata)
+{
 
 	// mapping the local thread index onto the index
 	//of the array element we are going to be working on.
