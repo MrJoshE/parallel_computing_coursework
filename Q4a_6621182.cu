@@ -20,14 +20,12 @@
  * Definition for global varibles that can be changed.
  */
 
-// Represents the size of the grids.
-#define GRID_SIZE 32
 // Represents the number of blocks.
 #define NUM_BLOCKS 4
 // Represents the number of threads in each block.
 #define BLOCK_SIZE 64
 // Represents the number of elements in the input array
-#define N 32
+#define N 4096
 
 /*
  * Function that will perform reduction on sections of the input array.
@@ -117,6 +115,7 @@ int main(void)
 
 	// Call the sumArray function passing in the idata array to reduce the array
 	// and store the result in the variable sum.
+
 	int sum = sumArray(idata);
 
 	//Now output the result of the reduction.
@@ -137,35 +136,22 @@ int main(void)
 __host__ int sumArray(int* arr )
 {
 
-	/*
-	 *  Create a pointer to an integer array in the variable dev_arr.
-	 *
-	 *  This array will be a temporary array that will have the contents
-	 *  of the input array (arr) copied into it.
-	 *
-	 */
+	// Dynamic grid size so that the grid size can be dependent depending on the size of the input array and the block size
+	// makes it more efficient.
+	int grid_size = ceil(static_cast< int >(N)/BLOCK_SIZE);
 
-	int* dev_arr;
-
-	// Allocate the dev_arr as much memory as the input arr has (as it will need to hold the same contents).
-
-
-	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
-	CudaSafeCall(cudaMalloc((void**)&dev_arr, N * sizeof(int)));
-
-    // Copy the contents of arr into the dev_arr
-
-	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
-	CudaSafeCall(cudaMemcpy(dev_arr, arr, N * sizeof(int), cudaMemcpyHostToDevice));
 
     // Define the variable that will hold the sum that will be returned.
-	int sum;
+	int sum = 0;
 
 	/*
 	 *  Create a pointer to an integer array in the variable dev_out.
 	 *
 	 *  This array will be an array that will contain the ongoing sum
-	 *  of the array for each section of the sum. The final sum will be taken from this array.
+	 *  of the array for each section of the sum.
+	 *
+	 *  The contents of this array will summed by the CPU to get the final
+	 *  reduction.
 	 *
 	 */
 	int* dev_out;
@@ -173,51 +159,23 @@ __host__ int sumArray(int* arr )
 	// Allocate memory to the dev_out array at the size of the grids.
 
 	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
-	CudaSafeCall(cudaMalloc((void**)&dev_out, sizeof(int)* GRID_SIZE));
+	CudaSafeCall(cudaMallocManaged(&dev_out, sizeof(int)* grid_size));
 
 
 	// Call the reduce kernel function to get the partial results of the sum.
-	reduceKernel<<<GRID_SIZE, BLOCK_SIZE>>>(N, dev_arr, dev_out);
-
-	// Check to see if an error was thrown during the kernel invocation
-	cudaError err = cudaGetLastError();
-	if ( cudaSuccess != err )
-	{
-		fprintf( stderr, "cudaCheckError() failed at %s:%i : %s\n", __FILE__, __LINE__, cudaGetErrorString( err ) );
-		exit( -1 );
-	}
+	reduceKernel<<<grid_size, BLOCK_SIZE>>>(N, arr, dev_out);
 
 	//dev_out now holds the partial result
 
-	// Reduce the partial results into a single result stored index 0 of the dev_out array.
-	reduceKernel<<<1, BLOCK_SIZE>>>( GRID_SIZE,dev_out, dev_out);
-
-	// Check to see if an error was thrown during the kernel invocation
-	err = cudaGetLastError();
-	if ( cudaSuccess != err )
-	{
-		fprintf( stderr, "cudaCheckError() failed at %s:%i : %s\n", __FILE__, __LINE__, cudaGetErrorString( err ) );
-		exit( -1 );
-	}
-
-
-	//dev_out[0] now holds the final result
-
 	// Synchronise the device
-
 	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
 	CudaSafeCall(cudaDeviceSynchronize());
 
-	// Copy the first value of the dev_out into the sum variable. Done by copying the amount of memory that a single integer takes
-	// from the start pointer of the dev_out array into sum.
-
-	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
-	CudaSafeCall(cudaMemcpy(&sum, dev_out, sizeof(int), cudaMemcpyDeviceToHost));
-
-	// Free up the memory allocated to the dev_arr array.
-
-	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
-	CudaSafeCall(cudaFree(dev_arr));
+	// Performing the final reduction on the CPU as only 1 kernal call was allowed.
+	for (int i = 0; i < grid_size; i++){
+		// Adds the element of the array to the sum
+		sum += dev_out[i];
+	}
 
 	// Free up the memory allocated to the dev_out array.
 
