@@ -12,20 +12,22 @@
  * will Reduce a 1D array of elements into a single summary value,
  * where the size of the input array will require the use of multiple
  * blocks of threads. The reduction should give the sum of the list.
+ *
+ * Below there is a definition of the number of elements in the
+ * input array. Just change that number to change the size of the
+ * input array.
 */
-
+#define InputArraySize 4096
 
 
 /*
  * Definition for global varibles that can be changed.
  */
 
-// Represents the number of blocks.
-#define NUM_BLOCKS 4
 // Represents the number of threads in each block.
-#define BLOCK_SIZE 64
-// Represents the number of elements in the input array
-#define N 4096
+#define BLOCK_SIZE 8
+
+static int readCount = 0;
 
 /*
  * Function that will perform reduction on sections of the input array.
@@ -100,18 +102,19 @@ int main(void)
 	// input array is overwritten to provide the result
 
 	// Wrapping this in a CudaSafeCall function to handle the error if one is thrown.
-	CudaSafeCall(cudaMallocManaged(&idata, N*sizeof(int)));
+	CudaSafeCall(cudaMallocManaged(&idata, InputArraySize*sizeof(int)));
 
 
-	printf("Allocated memory %ld bytes to the array data.\n", N*sizeof(int) );
+	printf("Allocated memory %ld bytes to the array data.\n", InputArraySize*sizeof(int) );
 
 	//Initialise the input data on the host
 	//Making it easy to test the result
-	for(int i=0; i < N; i++)
+	for(int i=0; i < InputArraySize; i++)
 	{
 		idata[i] = i;
 	}
-	printf("Populated array data with values up from 0 to %d.\n", N);
+
+	printf("Populated array data with values up from 0 to %d.\n", InputArraySize);
 
 	// Call the sumArray function passing in the idata array to reduce the array
 	// and store the result in the variable sum.
@@ -138,8 +141,7 @@ __host__ int sumArray(int* arr )
 
 	// Dynamic grid size so that the grid size can be dependent depending on the size of the input array and the block size
 	// makes it more efficient.
-	int grid_size = ceil(static_cast< int >(N)/BLOCK_SIZE);
-
+	int grid_size = ceil(static_cast< int >(InputArraySize)/BLOCK_SIZE);
 
     // Define the variable that will hold the sum that will be returned.
 	int sum = 0;
@@ -163,7 +165,7 @@ __host__ int sumArray(int* arr )
 
 
 	// Call the reduce kernel function to get the partial results of the sum.
-	reduceKernel<<<grid_size, BLOCK_SIZE>>>(N, arr, dev_out);
+	reduceKernel<<<grid_size, BLOCK_SIZE>>>(InputArraySize, arr, dev_out);
 
 	//dev_out now holds the partial result
 
@@ -201,7 +203,6 @@ __global__ void reduceKernel(int sizeOfArray, int *idata, int *odata)
 
 	// temporary sum of the section.
 	int sum = 0;
-
 	// For each of the grids sum its section of the input array
 	for (int i = gid; i < sizeOfArray; i += gridSize) {
 		sum += idata[i];
@@ -231,12 +232,16 @@ __global__ void reduceKernel(int sizeOfArray, int *idata, int *odata)
 		// to make sure all adds at one stage are done
 		__syncthreads();
 
-		// Update the value of the array element the thread is working on
-		// with the value of temp
-		if (tid == 0){
-			odata[blockIdx.x] = shArr[0];
-		}
+
 	}
+
+	// Update the value of the array element the thread is working on
+	// with the value of temp
+	// only ran when the thread id is 0.
+	if (tid == 0){
+		odata[blockIdx.x] = shArr[0];
+	}
+
 	//Once we have iterated through the for-loop, we will be left with the reduced value,
 	//which is in the one belonging to thread index 0, i.e. at data (input array) index 0.
 }
